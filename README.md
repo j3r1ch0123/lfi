@@ -14,7 +14,7 @@ The script sends an LFI payload to a vulnerable URL with a specified parameter.
 
 #### POST request (default)
 ```bash
-python lfi_exploit.py http://example.com/vuln_page.php param /etc/passwd
+python lfi_exploit.py http://example.com/vuln_page.php param /etc/passwd POST
 ```
 
 #### GET reqeust
