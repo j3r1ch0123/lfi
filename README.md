@@ -9,6 +9,7 @@ The script sends an LFI payload to a vulnerable URL with a specified parameter.
 ### Requirements
 - Python 3.11+
 - `requests` library (install via `pip install requests`)
+- `paramiko` library (install via `pip install paramiko`)
 
 ### Running the script
 
